@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>会員ページ｜合同会社ウィング</title>
+<link rel="stylesheet" href="style.css">
+<style>.job{background:#fff;border:1px solid var(--line);border-radius:8px;padding:16px;margin:14px 0}.job img{width:100%;border-radius:6px;display:block;margin-bottom:10px}.job p{margin:.4em 0;white-space:pre-wrap}.price{font-size:1.2rem;font-weight:700}</style></head><body>
+<div class="w"><section class="hero" style="padding-bottom:8px"><h1>会員ページ</h1></section>
+<div id="v-login" class="panel" hidden><p>会員登録がお済みの方は、LINEでログインできます。</p><p class="mut"><a href="register.html">まだの方は、無料の会員登録へ</a></p><button id="lg" class="btn line">LINEでログイン</button><p id="lm" class="err"></p></div>
+<div id="v-claim" class="panel" hidden><p>はじめての方は、登録時に表示された登録コードを入力してください。</p>
+<label>登録コード<input id="cc" maxlength="6" autocapitalize="characters" autocomplete="off"></label>
+<button id="cb" class="btn" style="margin-top:12px">確認する</button><p id="cm" class="err"></p><p class="mut">登録コードは、会員登録後の完了ページに表示されます。</p></div>
+<div id="v-app" hidden><p id="hi" class="mut"></p><div id="jl"></div><p><button id="out" class="btn sub">ログアウト</button></p></div>
+<footer><a href="index.html">トップへ戻る</a></footer></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.109.0"></script>
+<script src="config.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const PR=['未着手','進行中','提出済み'];
+let me=null;
+const show=v=>['v-login','v-claim','v-app'].forEach(x=>$(x).hidden=x!==v);
+
+async function init(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session)return show('v-login');
+  const get=()=>sb.from('members').select('id,nickname').eq('auth_user_id',session.user.id).maybeSingle();
+  let {data:m}=await get();
+  if(!m){
+    const c=sessionStorage.getItem('code');
+    if(c){sessionStorage.removeItem('code');const {data:ok}=await sb.rpc('claim_member',{p_code:c});if(ok)({data:m}=await get())}
+  }
+  if(!m)return show('v-claim');
+  me=m;show('v-app');$('hi').textContent=m.nickname+' さん';
+  await sb.rpc('touch_login');
+  load();
+}
+$('lg').onclick=async()=>{
+  const {error}=await sb.auth.signInWithOAuth({provider:'custom:line',options:{redirectTo:location.origin+location.pathname}});
+  if(error)$('lm').textContent='ログインを開始できませんでした。';
+};
+$('cb').onclick=async()=>{
+  const {data}=await sb.rpc('claim_member',{p_code:$('cc').value});
+  if(data)init();else $('cm').textContent='コードが違うか、すでに使われています。';
+};
+$('out').onclick=async()=>{await sb.auth.signOut();me=null;init()};
+
+function state(a){
+  if(a.status==='審査中')return '<span class="tag">審査中</span><p class="mut">合同会社ウィングで審査しています。</p>';
+  if(a.status==='見送り')return '<span class="tag">見送り</span><p class="mut">今回は見送りとなりました。</p>';
+  return `<span class="tag">合格</span>
+  <label>進み具合<select id="p-${esc(a.id)}">${PR.map(p=>`<option${p===a.progress?' selected':''}>${p}</option>`).join('')}</select></label>
+  <label>ひとこと<textarea id="n-${esc(a.id)}" rows="2" maxlength="500">${esc(a.progress_note||'')}</textarea></label>
+  <button class="btn" style="margin-top:10px" data-prog="${esc(a.id)}">進み具合を更新</button>`;
+}
+async function load(){
+  const [j,a]=await Promise.all([
+    sb.from('jobs').select('*').order('created_at',{ascending:false}),
+    sb.from('applications').select('*')]);
+  const ap=Object.fromEntries((a.data||[]).map(x=>[x.job_id,x]));
+  $('jl').innerHTML=(j.data||[]).map(r=>`<div class="job">
+    ${r.image_url?`<img src="${esc(r.image_url)}" alt="">`:''}
+    <h2>${esc(r.title)}</h2>
+    <p><span class="price">${Number(r.price).toLocaleString('ja-JP')}円</span>${r.deadline?`　納期 ${esc(r.deadline)}`:''}</p>
+    <p>${esc(r.description||'')}</p>
+    ${ap[r.id]?state(ap[r.id]):`<button class="btn" data-apply="${esc(r.id)}">応募する</button>`}</div>`).join('')
+    ||'<p class="mut">いま募集中の仕事はありません。</p>';
+}
+$('jl').onclick=async e=>{
+  const ap=e.target.closest('[data-apply]'),pg=e.target.closest('[data-prog]');
+  if(ap){
+    const {error}=await sb.from('applications').insert({job_id:ap.dataset.apply,member_id:me.id});
+    alert(error?'応募できませんでした。':'応募しました。審査をお待ちください。');load();
+  }
+  if(pg){
+    const id=pg.dataset.prog;
+    const {data}=await sb.rpc('update_progress',{p_app:id,p_progress:$('p-'+id).value,p_note:$('n-'+id).value});
+    alert(data?'更新しました。':'更新できませんでした。');load();
+  }
+};
+init();
+</script></body></html>

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>仕事・応募の管理</title>
+<link rel="stylesheet" href="style.css">
+<style>.btn.s{display:inline-block;width:auto;padding:6px 14px;margin:8px 6px 0 0}.item{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:8px 0}</style></head><body>
+<div class="w"><h1>仕事・応募の管理</h1><p><a href="admin.html">← 登録者の管理へ</a></p>
+<p id="gate" class="mut">読み込み中…</p>
+<div id="mfa" class="panel" hidden></div>
+<div id="app" hidden>
+<section><h2>応募の審査</h2><div id="al"></div></section>
+<section><h2>仕事を追加</h2>
+<form id="jf" class="panel">
+<label>タイトル<input id="jt" required maxlength="100"></label>
+<label>金額（円）<input id="jp" type="number" min="0" required></label>
+<label>内容<textarea id="jd" rows="4" maxlength="2000"></textarea></label>
+<label>納期（任意）<input id="jdl" type="date"></label>
+<label>画像（任意・2MBまで）<input id="ji" type="file" accept="image/*"></label>
+<button class="btn" style="margin-top:14px">募集を開始する</button><p id="jm" class="mut"></p></form></section>
+<section><h2>仕事一覧</h2><div id="jl"></div></section></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.109.0"></script>
+<script src="config.js"></script>
+<script src="admin-auth.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const yen=n=>Number(n).toLocaleString('ja-JP')+'円';
+async function init(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){$('gate').innerHTML='ログインが必要です。<a href="admin.html">管理画面でログイン</a>してから、このページを開いてください。';return}
+  if(!(await mfaOk($('mfa')))){$('gate').textContent='2段階認証が必要です。';return}
+  const {data:ok}=await sb.rpc('is_admin');
+  if(!ok){$('gate').textContent='管理者ではありません。';return}
+  $('gate').hidden=true;$('app').hidden=false;load();
+}
+async function load(){
+  const [j,a]=await Promise.all([
+    sb.from('jobs').select('*').order('created_at',{ascending:false}),
+    sb.from('applications').select('*, jobs(title,deadline), members(nickname,code,tiktok_id)').order('created_at',{ascending:false})]);
+  const today=new Date().toISOString().slice(0,10);
+  $('al').innerHTML=(a.data||[]).map(r=>{
+    const late=r.status==='合格'&&r.progress!=='提出済み'&&r.jobs?.deadline&&r.jobs.deadline<today;
+    return `<div class="item"><strong>${esc(r.members?.nickname)}</strong> @${esc(r.members?.tiktok_id)}（${esc(r.members?.code)}）<br>
+    ${esc(r.jobs?.title)}<br><span class="tag">${esc(r.status)}</span> 進捗：${esc(r.progress)}${late?' <span class="err">納期超過</span>':''}<br>
+    ${r.progress_note?`<small>${esc(r.progress_note)}</small><br>`:''}<small>更新 ${esc(r.updated_at.slice(0,10))}</small><br>
+    ${['審査中','合格','見送り'].map(s=>`<button class="btn sub s" data-a="${esc(r.id)}" data-s="${s}">${s}</button>`).join('')}</div>`;
+  }).join('')||'<p class="mut">まだ応募はありません。</p>';
+  $('jl').innerHTML=(j.data||[]).map(r=>`<div class="item"><strong>${esc(r.title)}</strong>　${yen(r.price)}<br>
+    <span class="tag">${esc(r.status)}</span>${r.deadline?' 納期 '+esc(r.deadline):''}<br>
+    <button class="btn sub s" data-j="${esc(r.id)}" data-act="toggle" data-st="${esc(r.status)}">${r.status==='募集中'?'募集を終了':'募集を再開'}</button>
+    <button class="btn sub s" style="color:var(--err)" data-j="${esc(r.id)}" data-act="del">削除</button></div>`).join('')
+    ||'<p class="mut">まだ仕事がありません。</p>';
+}
+$('al').onclick=async e=>{
+  const b=e.target.closest('[data-a]');if(!b)return;
+  const {error}=await sb.from('applications').update({status:b.dataset.s,updated_at:new Date().toISOString()}).eq('id',b.dataset.a);
+  if(error)alert('更新できませんでした。');else load();
+};
+$('jl').onclick=async e=>{
+  const b=e.target.closest('[data-j]');if(!b)return;
+  if(b.dataset.act==='toggle'){
+    const {error}=await sb.from('jobs').update({status:b.dataset.st==='募集中'?'終了':'募集中'}).eq('id',b.dataset.j);
+    if(error)alert('更新できませんでした。');
+  }else{
+    if(!confirm('この仕事と、その応募記録を完全に削除します。よろしいですか？'))return;
+    const {error}=await sb.from('jobs').delete().eq('id',b.dataset.j);
+    if(error)alert('削除できませんでした。');
+  }
+  load();
+};
+$('jf').onsubmit=async e=>{
+  e.preventDefault();
+  const btn=e.target.querySelector('button'),m=$('jm');btn.disabled=true;m.className='mut';m.textContent='保存中…';
+  let image_url=null;const file=$('ji').files[0];
+  if(file){
+    if(file.size>2*1024*1024){m.className='err';m.textContent='画像は2MB以下にしてください。';btn.disabled=false;return}
+    const path=crypto.randomUUID()+'.'+((file.name.split('.').pop()||'jpg').toLowerCase());
+    const up=await sb.storage.from('job-images').upload(path,file,{contentType:file.type});
+    if(up.error){m.className='err';m.textContent='画像をアップロードできませんでした。';btn.disabled=false;return}
+    image_url=sb.storage.from('job-images').getPublicUrl(path).data.publicUrl;
+  }
+  const {error}=await sb.from('jobs').insert({title:$('jt').value.trim(),price:Number($('jp').value),description:$('jd').value.trim()||null,deadline:$('jdl').value||null,image_url});
+  btn.disabled=false;
+  if(error){m.className='err';m.textContent='保存できませんでした。';return}
+  e.target.reset();m.textContent='募集を開始しました。';load();
+};
+init();
+</script></body></html>
