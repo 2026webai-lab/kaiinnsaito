@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>無料会員登録｜合同会社ウィング</title>
+<meta name="description" content="TikTokで活動する方向けの無料登録。空き時間でできるお仕事を公式LINEでご案内します。">
+<link rel="stylesheet" href="style.css"></head><body>
+<div class="w"><section class="hero" style="padding-bottom:8px"><span class="tag">登録無料</span><h1>会員登録</h1><p class="mut">1分で終わります。登録後、LINEでログインしてお仕事を選べます。</p>
+<img src="hero2.jpg" width="1100" height="821" alt="プレゼントの箱を開けながら動画を撮影する男性（イメージ）" style="width:100%;height:auto;border-radius:12px;margin:14px 0 4px">
+<p class="mut" style="margin:0 0 4px;font-size:.78rem">※画像はイメージです。</p></section>
+<section id="form"><h2>無料登録</h2>
+<form id="f" class="panel">
+<input name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px">
+<label>ニックネーム<input name="nickname" required maxlength="50"></label>
+<label>TikTok ID（@は不要）<input name="tiktok_id" required maxlength="41" pattern="@?[A-Za-z0-9._]{1,40}" autocapitalize="none"></label>
+<label>LINEの表示名<input name="line_name" required maxlength="50"></label>
+<label>得意なこと（例：撮影・編集・出演）<input name="skills" maxlength="200"></label>
+<label>対応できる時間の目安<select name="availability"><option>週1〜3時間</option><option>週3〜10時間</option><option>週10時間以上</option><option>不定</option></select></label>
+<label style="display:flex;gap:8px;font-weight:400"><input type="checkbox" required style="width:auto;margin-top:6px"><span><a href="legal.html#privacy">プライバシーポリシー</a>に同意します</span></label>
+<button class="btn" style="margin-top:16px">無料で登録する</button>
+<p id="m" class="mut" role="status">登録後に、公式LINEの友だち追加をお願いします。</p></form>
+<p style="margin-top:16px"><a class="btn line" href="https://lin.ee/Ts2aWE6">公式LINEを友だち追加</a></p></section>
+<footer><a href="index.html">トップへ戻る</a>　<a href="legal.html">運営会社・プライバシーポリシー</a></footer></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.109.0"></script>
+<script src="config.js"></script>
+<script>
+const f=document.getElementById('f'),m=document.getElementById('m');
+const CH='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const mk=()=>Array.from(crypto.getRandomValues(new Uint8Array(6)),b=>CH[b%32]).join('');
+f.addEventListener('submit',async e=>{
+  e.preventDefault();
+  if(f.website.value)return;
+  const btn=f.querySelector('button');btn.disabled=true;m.className='mut';m.textContent='送信中…';
+  const d=new FormData(f);
+  const row={
+    nickname:d.get('nickname').trim(),
+    tiktok_id:d.get('tiktok_id').trim().replace(/^@/,'').toLowerCase(),
+    line_name:d.get('line_name').trim(),
+    skills:d.get('skills').trim()||null,
+    availability:d.get('availability'),
+    consented_at:new Date().toISOString()
+  };
+  for(let i=0;i<3;i++){
+    row.code=mk();
+    const {error}=await sb.from('members').insert(row);
+    if(!error){sessionStorage.setItem('code',row.code);location.href='thanks.html';return}
+    if(error.code==='23505'&&/tiktok/.test(error.message)){m.className='err';m.textContent='このTikTok IDはすでに登録されています。';btn.disabled=false;return}
+    if(error.code!=='23505')break;
+  }
+  m.className='err';m.textContent='送信できませんでした。時間をおいて、もう一度お試しください。';btn.disabled=false;
+});
+</script></body></html>
